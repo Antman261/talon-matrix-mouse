@@ -7,8 +7,8 @@ from talon.skia import Rect
 
 
 mod = Module()
-mod.tag("vox_mouse", desc="Moving mouse with grid")
-mod.tag("vox_mouse_subgrid_active", desc="Vox Mouse subgrid active")
+mod.tag("matrix_mouse", desc="Moving mouse with matrix")
+mod.tag("matrix_mouse_subgrid_active", desc="Matrix mouse subgrid active")
 ctx = Context()
 mcanvas = None
 
@@ -34,7 +34,7 @@ screenHeight = 0
 cell_width = 0
 cell_height = 0
 subgrid_num_columns = 7
-subgrid_num_rows = 2
+subgrid_num_rows = 3
 subgrid_width = 0
 subgrid_height = 0
 subgrid_cell_width = 0
@@ -244,10 +244,11 @@ def perform_mouse_action(x, y, mouse_action: str | None = None):
 def open_grid(input_length: int = 0):
     global status
     status = Status.open
+    clear_active_cell()
     calc_grid()
     if input_length < 3:
         draw_grid()
-    ctx.tags = ["user.vox_mouse"]
+    ctx.tags = ["user.matrix_mouse"]
 
 
 def activate_zone(zone):
@@ -302,20 +303,16 @@ def process_input(text, action="left"):
 
 @mod.action_class
 class GridActions:
-    def mouse_grid_start():
+    def matrix_mouse_grid_start():
         """Display the full mouse grid"""
         open_grid()
 
-    def mouse_grid_stop():
+    def matrix_mouse_grid_stop():
         """Clear the mouse grid and cancel any in-progress action"""
         close_grid()
 
-    def vox_mouse_grid_move(letters: str):
-        """"""
-        process_input(letters, None)
-
-    def vox_mouse(letters: str, action: str | None = None):
-        """"""
+    def matrix_mouse(letters: str, action: str | None = None):
+        """Move the mouse to the grid position specified by letters and perform the action, if provided"""
         global mouse_action
         mouse_action = action if mouse_action is None else mouse_action
         process_input(letters, mouse_action)
