@@ -1,8 +1,9 @@
 from functools import reduce
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 import math
+from time import sleep
 from typing import List
-from talon import Module, Context, ui, canvas, actions
+from talon import Module, Context, ui, canvas, actions, ctrl
 from talon.skia import Rect
 
 
@@ -20,23 +21,32 @@ class Status(Enum):
     cell = auto()
 
 
+class Resolution(StrEnum):
+    zone = "zone"
+    cell = "cell"
+    subcell = "subcell"
+    range = "range"
+
+
 status: Status = Status.idle
 mouse_action = None
 cells = {}
 subcells = {}
 active_zone = "000"
 active_cell = "000"
+active_range = None
 num_columns = 25
 num_rows = 30
+zone_size = 5
 grid_key_map = {}
 screenWidth = 0
 screenHeight = 0
+zone_width = 0
+zone_height = 0
 cell_width = 0
 cell_height = 0
 subgrid_num_columns = 7
 subgrid_num_rows = 3
-subgrid_width = 0
-subgrid_height = 0
 subgrid_cell_width = 0
 subgrid_cell_height = 0
 
@@ -59,25 +69,30 @@ def redraw():
     mcanvas.pause()
 
 
-def to_grid_key(row_index, column_index):
-    letter_one = letter_matrix[math.floor(row_index / 5)][math.floor(column_index / 5)]
-    letter_two = letter_matrix[row_index % 5][column_index % 5]
+def to_zone_key(row_index, column_index):
+    return letter_matrix[math.floor(row_index / zone_size)][
+        math.floor(column_index / zone_size)
+    ]
+
+
+def to_cell_key(row_index, column_index):
+    letter_one = to_zone_key(row_index, column_index)
+    letter_two = letter_matrix[row_index % zone_size][column_index % zone_size]
     return f"{letter_one}{letter_two}"
 
 
 for idx in range(0, num_rows * num_columns):
     column_index = idx % num_columns
     row_index = math.floor(idx / num_columns)
-    grid_key = to_grid_key(row_index, column_index)
+    grid_key = to_cell_key(row_index, column_index)
     grid_key_map[grid_key] = (row_index, column_index)
 
 
+def from_cell_key(key: str) -> int:
+    return grid_key_map[key]
+
+
 def calc_subgrid(grid_x_start, grid_x_end, grid_y_start, grid_y_end):
-    global subgrid_cell_width, subgrid_cell_height, subgrid_width, subgrid_height
-    subgrid_width = grid_x_end - grid_x_start
-    subgrid_height = grid_y_end - grid_y_start
-    subgrid_cell_width = round(subgrid_width / (subgrid_num_columns))
-    subgrid_cell_height = round(subgrid_height / (subgrid_num_rows))
     idx = 0
     for row_index in range(0, subgrid_num_rows):
         for column_index in range(0, subgrid_num_columns):
@@ -107,7 +122,7 @@ def get_active_cell_tuple():
 
 
 def calc_grid():
-    global mcanvas, screenWidth, screenHeight, cell_width, cell_height
+    global mcanvas, screenWidth, screenHeight, zone_width, zone_height, cell_width, cell_height, subgrid_cell_width, subgrid_cell_height
     if mcanvas != None:
         print("Canvas already exists ")
         return
@@ -118,6 +133,10 @@ def calc_grid():
     screenHeight = screen.height
     cell_width = round(screenWidth / (num_columns))
     cell_height = round(screenHeight / (num_rows))
+    zone_width = round(cell_width * zone_size)
+    zone_height = round(cell_height * zone_size)
+    subgrid_cell_width = round(cell_width / (subgrid_num_columns))
+    subgrid_cell_height = round(cell_height / (subgrid_num_rows))
     for row_index in range(0, num_rows):
         for column_index in range(0, num_columns):
             x_start = round(column_index * cell_width)
@@ -126,7 +145,7 @@ def calc_grid():
             y_start = round(row_index * cell_height)
             y_end = y_start + cell_height
             y_centre = y_end - (cell_height / 2)
-            cells[to_grid_key(row_index, column_index)] = (
+            cells[to_cell_key(row_index, column_index)] = (
                 x_start,
                 x_end,
                 x_centre,
@@ -150,7 +169,7 @@ def draw_subgrid(c):
     c.paint.color = theme["grid_line"]
     for idx in range(1, subgrid_num_columns):
         x_offset = grid_x_start + round(idx * subgrid_cell_width)
-        c.draw_line(x_offset, grid_y_start, x_offset, grid_y_start + subgrid_height)
+        c.draw_line(x_offset, grid_y_start, x_offset, grid_y_start + cell_height)
     for idx in range(1, subgrid_num_rows):
         y_offset = grid_y_start + round(idx * subgrid_cell_height)
         c.draw_line(grid_x_start, y_offset, grid_x_end, y_offset)
@@ -173,14 +192,23 @@ def get_zone_tuple():
 
 
 def draw_zone(c):
-    (start, end) = get_zone_tuple()[:2]
+    start = get_zone_tuple()[0]
     x_start = start[0]
     y_start = start[3]
-    x_end = end[1]
-    y_end = end[4]
-    zone_box = Rect(x_start, y_start, x_end - x_start, y_end - y_start)
+    zone_box = Rect(x_start, y_start, zone_width, zone_height)
     c.paint.color = theme["zone_bg"]
     c.draw_rect(zone_box)
+
+
+def draw_range(c):
+    print("draw_range.active_range:", active_range)
+    x_start = cells[active_range[:2]][0]
+    x_end = cells[active_range[2:]][1]
+    y_start = cells[active_range[:2]][3]
+    y_end = cells[active_range[2:]][4]
+    range_box = Rect(x_start, y_start, x_end - x_start, y_end - y_start)
+    c.paint.color = theme["zone_bg"]
+    c.draw_rect(range_box)
 
 
 def draw_grid():
@@ -190,6 +218,8 @@ def draw_grid():
         c.draw_rect(Rect(0, 0, screenWidth, screenHeight))
         c.paint.typeface = "arial"
         c.paint.textsize = round(min(cell_height * 0.5, cell_width * 0.5))
+        if active_range is not None:
+            draw_range(c)
         if active_zone != "000":
             draw_zone(c)
         c.paint.color = theme["grid_line"]
@@ -205,7 +235,7 @@ def draw_grid():
             c.draw_line(0, y_offset, screenWidth, y_offset)
         for row_index in range(0, num_rows):
             for column_index in range(0, num_columns):
-                grid_key = to_grid_key(row_index, column_index)
+                grid_key = to_cell_key(row_index, column_index)
                 if grid_key == get_active_cell_grid_key():
                     continue
                 (_, __, x_centre, ___, ____, y_centre) = cells[grid_key]
@@ -269,11 +299,12 @@ def activate_cell(cell):
 
 
 def close_grid():
-    global status, mcanvas, mouse_action
+    global status, mcanvas, mouse_action, active_range
     status = Status.idle
     if mcanvas != None:
         mcanvas = mcanvas.close()
     clear_active_cell()
+    active_range = None
     mouse_action = None
     ctx.tags = []
 
@@ -301,6 +332,57 @@ def process_input(text, action="left"):
     redraw()
 
 
+def nearest_cell(x, y):
+    column_idx = round(x / cell_width)
+    row_idx = round(y / cell_height)
+    print("nearest_cell.x_cell_idx:", column_idx)
+    print("nearest_cell.y_cell_idx:", row_idx)
+    return to_cell_key(row_idx, column_idx)
+
+
+def nearest_zone(x, y):
+    print("nearest_zone.zone_width:", zone_width)
+    print("nearest_zone.zone_height:", zone_height)
+    column_idx = round(x / zone_width)
+    row_idx = round(y / zone_height)
+    print("nearest_zone.column_idx:", column_idx)
+    print("nearest_zone.row_idx:", row_idx)
+    return letter_matrix[row_idx][column_idx]
+
+
+def nearest_subcell(x, y):
+    x_subcell_idx = round((x % cell_width) / subgrid_cell_width)
+    y_subcell_idx = round((y % cell_height) / subgrid_cell_height)
+    subcell_letter = alpha[y_subcell_idx * subgrid_num_columns + x_subcell_idx]
+    return f"{nearest_cell(x, y)}{subcell_letter}"
+
+
+def activate_range(x, y, size):
+    global active_range
+    centre_cell = nearest_cell(x, y)
+    print("activate_range.centre_cell", centre_cell)
+    (centre_row, centre_column) = from_cell_key(centre_cell)
+    print("activate_range.(centre_row, centre_column):", (centre_row, centre_column))
+    start_row = max(centre_row - size, 0)
+    start_column = max(centre_column - size, 0)
+    end_row = min(centre_row + size, num_rows - 1)
+    end_column = min(centre_column + size, num_columns - 1)
+    print("activate_range.start_row:", start_row)
+    print("activate_range.start_column:", start_column)
+    print("activate_range.end_row:", end_row)
+    print("activate_range.end_column:", end_column)
+    active_range = (
+        f"{to_cell_key(start_row, start_column)}{to_cell_key(end_row, end_column)}"
+    )
+
+
+def prepare_matrix_gaze():
+    actions.tracking.jump()
+    sleep(0.03)
+    calc_grid()
+    return ctrl.mouse_pos()
+
+
 @mod.action_class
 class GridActions:
     def matrix_mouse_grid_start():
@@ -316,3 +398,21 @@ class GridActions:
         global mouse_action
         mouse_action = action if mouse_action is None else mouse_action
         process_input(letters, mouse_action)
+
+    def matrix_gaze_range(size: int = 3):
+        """Move the mouse to the cell position closest to the gaze position"""
+        pos = prepare_matrix_gaze()
+        open_grid()
+        activate_range(*pos, size)
+
+    def matrix_gaze(resolution: str, action: str | None = None):
+        """Move the mouse to the grid position closest to the gaze position at the specified resolution"""
+        pos = prepare_matrix_gaze()
+        match (resolution):
+            case Resolution.zone:
+                process_input(nearest_zone(*pos))
+            case Resolution.cell:
+                process_input(nearest_cell(*pos))
+            case Resolution.subcell:
+                process_input(nearest_subcell(*pos), action)
+        redraw()
