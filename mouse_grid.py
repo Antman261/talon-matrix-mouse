@@ -35,6 +35,7 @@ subcells = {}
 active_zone = "000"
 active_cell = "000"
 active_range = None
+active_inner_range = None
 num_columns = 25
 num_rows = 30
 zone_size = 5
@@ -157,6 +158,7 @@ def calc_grid():
 
 theme = {
     "zone_bg": "30214499",
+    "inner_highlight_bg": "30416485",
     "cell_text": "ccccccdf",
     "grid_line": "7945ab60",
     "grid_bg": "00002244",
@@ -200,15 +202,20 @@ def draw_zone(c):
     c.draw_rect(zone_box)
 
 
+def range_key_to_xywh(range_key: str):
+    x_start = cells[range_key[:2]][0]
+    y_start = cells[range_key[:2]][3]
+    width = cells[range_key[2:]][1] - x_start
+    height = cells[range_key[2:]][4] - y_start
+    return (x_start, y_start, width, height)
+
+
 def draw_range(c):
     print("draw_range.active_range:", active_range)
-    x_start = cells[active_range[:2]][0]
-    x_end = cells[active_range[2:]][1]
-    y_start = cells[active_range[:2]][3]
-    y_end = cells[active_range[2:]][4]
-    range_box = Rect(x_start, y_start, x_end - x_start, y_end - y_start)
     c.paint.color = theme["zone_bg"]
-    c.draw_rect(range_box)
+    c.draw_rect(Rect(*range_key_to_xywh(active_range)))
+    c.paint.color = theme["inner_highlight_bg"]
+    c.draw_rect(Rect(*range_key_to_xywh(active_inner_range)))
 
 
 def draw_grid():
@@ -327,26 +334,20 @@ def process_input(text, action="left"):
                     mouse_action = action if action is not None else "left"
                 else:
                     mouse_action = action if action is not None else mouse_action
-                perform_mouse_action(*subcells[letter], mouse_action)
+                (gaze | look)(*subcells[letter], mouse_action)
                 close_grid()
     redraw()
 
 
 def nearest_cell(x, y):
-    column_idx = round(x / cell_width)
-    row_idx = round(y / cell_height)
-    print("nearest_cell.x_cell_idx:", column_idx)
-    print("nearest_cell.y_cell_idx:", row_idx)
+    column_idx = math.floor(x / cell_width)
+    row_idx = math.floor(y / cell_height)
     return to_cell_key(row_idx, column_idx)
 
 
 def nearest_zone(x, y):
-    print("nearest_zone.zone_width:", zone_width)
-    print("nearest_zone.zone_height:", zone_height)
     column_idx = round(x / zone_width)
     row_idx = round(y / zone_height)
-    print("nearest_zone.column_idx:", column_idx)
-    print("nearest_zone.row_idx:", row_idx)
     return letter_matrix[row_idx][column_idx]
 
 
@@ -357,23 +358,27 @@ def nearest_subcell(x, y):
     return f"{nearest_cell(x, y)}{subcell_letter}"
 
 
-def activate_range(x, y, size):
-    global active_range
-    centre_cell = nearest_cell(x, y)
-    print("activate_range.centre_cell", centre_cell)
-    (centre_row, centre_column) = from_cell_key(centre_cell)
-    print("activate_range.(centre_row, centre_column):", (centre_row, centre_column))
-    start_row = max(centre_row - size, 0)
-    start_column = max(centre_column - size, 0)
-    end_row = min(centre_row + size, num_rows - 1)
-    end_column = min(centre_column + size, num_columns - 1)
-    print("activate_range.start_row:", start_row)
-    print("activate_range.start_column:", start_column)
-    print("activate_range.end_row:", end_row)
-    print("activate_range.end_column:", end_column)
-    active_range = (
-        f"{to_cell_key(start_row, start_column)}{to_cell_key(end_row, end_column)}"
+def subtract_position(centre_row, centre_column, y_distance=0, x_distance=0):
+    return max(centre_row - y_distance, 0), max(centre_column - x_distance, 0)
+
+
+def add_position(centre_row, centre_column, y_distance=0, x_distance=0):
+    return min(centre_row + x_distance, num_rows - 1), min(
+        centre_column + y_distance, num_columns - 1
     )
+
+
+def to_range(*centre, delta):
+    start = subtract_position(*centre, delta, delta)
+    end = add_position(*centre, delta, delta)
+    return f"{to_cell_key(*start)}{to_cell_key(*end)}"
+
+
+def activate_range(x, y, size):
+    global active_range, active_inner_range
+    centre = from_cell_key(nearest_cell(x, y))
+    active_range = to_range(*centre, delta=size)
+    active_inner_range = to_range(*centre, delta=size - 2)
 
 
 def prepare_matrix_gaze():
