@@ -334,7 +334,7 @@ def process_input(text, action="left"):
                     mouse_action = action if action is not None else "left"
                 else:
                     mouse_action = action if action is not None else mouse_action
-                (gaze | look)(*subcells[letter], mouse_action)
+                perform_mouse_action(*subcells[letter], mouse_action)
                 close_grid()
     redraw()
 
