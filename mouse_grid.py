@@ -257,14 +257,25 @@ def draw_grid():
     mcanvas.register("draw", on_draw)
     mcanvas.pause()
 
+control_enabled = None
+control1_enabled = None
 
-def perform_mouse_action(x, y, mouse_action: str | None = None):
+def save_tracking_state():
+    global control_enabled, control1_enabled
     control_enabled = actions.tracking.control_enabled()
     control1_enabled = actions.tracking.control1_enabled()
-    if control_enabled:
-        actions.tracking.control_toggle()
-    if control1_enabled:
-        actions.tracking.control1_toggle()
+    actions.tracking.control_toggle(False)
+    actions.tracking.control1_toggle(False )
+    
+
+
+def restore_tracking_state():
+    global control_enabled, control1_enabled
+    actions.tracking.control_toggle(control_enabled)
+    actions.tracking.control1_toggle(control1_enabled)
+
+def perform_mouse_action(x, y, mouse_action: str | None = None):
+    save_tracking_state()
     actions.mouse_move(x, y)
     if mouse_action != None:
         match mouse_action:
@@ -272,10 +283,7 @@ def perform_mouse_action(x, y, mouse_action: str | None = None):
                 actions.mouse_click(0)
             case "right":
                 actions.mouse_click(1)
-    if control_enabled:
-        actions.tracking.control_toggle()
-    if control1_enabled:
-        actions.tracking.control1_toggle()
+    restore_tracking_state()
 
 
 def open_grid(input_length: int = 0):
