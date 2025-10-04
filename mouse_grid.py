@@ -312,6 +312,17 @@ def activate_cell(cell):
     calc_subgrid(x_start, x_end, y_start, y_end)
     perform_mouse_action(x_centre, y_centre)
 
+def to_previous_status():
+    zone = active_zone
+    clear_active_cell()
+    match status:
+        case Status.cell:
+            activate_zone(zone)
+        case Status.zone:
+            open_grid()
+        case Status.open:
+            close_grid()
+    redraw()
 
 def close_grid():
     global status, mcanvas, mouse_action, active_range
@@ -412,6 +423,10 @@ class GridActions:
         mouse_action = action if mouse_action is None else mouse_action
         process_input(letters, mouse_action)
 
+    def matrix_mouse_out():
+        """Return to the previous grid level. For example, if a cell has been selected, return to its zone"""
+        to_previous_status()
+    
     def matrix_gaze_range(size: int = 3):
         """Move the mouse to the cell position closest to the gaze position"""
         pos = prepare_matrix_gaze()

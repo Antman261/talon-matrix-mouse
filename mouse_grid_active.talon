@@ -1,6 +1,7 @@
 tag: user.matrix_mouse
 -
-out: user.matrix_mouse_grid_stop()
+clear: user.matrix_mouse_grid_stop()
+out: user.matrix_mouse_out()
 right (<user.letter> | <user.number_key>): user.matrix_mouse(letter or number_key, "right")
 key(a): user.matrix_mouse("a")
 key(b): user.matrix_mouse("b")
