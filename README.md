@@ -21,7 +21,7 @@ git clone https://github.com/antman261/talon-matrix-mouse.git matrix-mouse
 
 ## Usage
 
-**_Tip!_**: Hide the matrix overlay at any time by uttering `out`
+**_Tip!_**: Hide the matrix overlay at any time by uttering `clear`
 
 ### Step by Step Activation
 
@@ -49,8 +49,12 @@ You can also specify a specific cell immediately by supplying two letters: `matr
 
 This also works with right clicking: `matrix right air bob drum`
 
+### Gaze Activation
+
+You can also use matrix mouse with eye tracking to quickly refine your mouse position and click targets. For example, `matrix look zone` will activate the zone closest to where you are looking. This works if "Control Mouse" AND "Gaze Control" is on, or it works if "Always On" is on in the eye tracking menu.
+
 ## Upcoming Features & Improvements
 
-* Customizable Styling: User defined settings controlling colours and transparency
+* Customizable Styling: User defined settings controlling colors and transparency
 * Dragging: Start and stop dragging actions
 * Modifier clicking: Left click, right click, or drag with keyboard modifiers such as shift

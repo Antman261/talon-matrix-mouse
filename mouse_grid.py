@@ -5,6 +5,7 @@ from time import sleep
 from typing import List
 from talon import Module, Context, ui, canvas, actions, ctrl
 from talon.skia import Rect
+from talon.plugins import eye_mouse_2
 
 
 mod = Module()
@@ -125,7 +126,6 @@ def get_active_cell_tuple():
 def calc_grid():
     global mcanvas, screenWidth, screenHeight, zone_width, zone_height, cell_width, cell_height, subgrid_cell_width, subgrid_cell_height
     if mcanvas != None:
-        print("Canvas already exists ")
         return
     screens = ui.screens()
     screen = screens[0]
@@ -211,7 +211,6 @@ def range_key_to_xywh(range_key: str):
 
 
 def draw_range(c):
-    print("draw_range.active_range:", active_range)
     c.paint.color = theme["zone_bg"]
     c.draw_rect(Rect(*range_key_to_xywh(active_range)))
     c.paint.color = theme["inner_highlight_bg"]
@@ -244,6 +243,8 @@ def draw_grid():
             for column_index in range(0, num_columns):
                 grid_key = to_cell_key(row_index, column_index)
                 if grid_key == get_active_cell_grid_key():
+                    continue
+                if active_zone  != "000" and grid_key[0] != active_zone:
                     continue
                 (_, __, x_centre, ___, ____, y_centre) = cells[grid_key]
                 textrect = c.paint.measure_text(grid_key)[1]
@@ -365,14 +366,14 @@ def nearest_cell(x, y):
 
 
 def nearest_zone(x, y):
-    column_idx = round(x / zone_width)
-    row_idx = round(y / zone_height)
+    column_idx = math.floor(x / zone_width)
+    row_idx = math.floor(y / zone_height)
     return letter_matrix[row_idx][column_idx]
 
 
 def nearest_subcell(x, y):
-    x_subcell_idx = round((x % cell_width) / subgrid_cell_width)
-    y_subcell_idx = round((y % cell_height) / subgrid_cell_height)
+    x_subcell_idx = math.floor((x % cell_width) / subgrid_cell_width)
+    y_subcell_idx = math.floor((y % cell_height) / subgrid_cell_height)
     subcell_letter = alpha[y_subcell_idx * subgrid_num_columns + x_subcell_idx]
     return f"{nearest_cell(x, y)}{subcell_letter}"
 
@@ -399,13 +400,33 @@ def activate_range(x, y, size):
     active_range = to_range(*centre, delta=size)
     active_inner_range = to_range(*centre, delta=size - 2)
 
+def is_mouse_jump_on():
+    return eye_mouse_2.control_mouse_jump_toggle.enabled
+
+def is_always_on():
+    return eye_mouse_2.always_on.enabled
+
+def is_gaze_control_on():
+    return eye_mouse_2.control_gaze_toggle.enabled
+def is_head_control_on():
+    return eye_mouse_2.control_head_toggle.enabled
+def is_active_movement_on():
+    return is_any_mouse_control_on() and is_gaze_control_on()
+def is_any_mouse_control_on():
+    return (
+            actions.tracking.control_zoom_enabled()
+            or actions.tracking.control_enabled()
+            or actions.tracking.control1_enabled()
+        )
+def should_jump():
+    return is_always_on() and (is_active_movement_on() == False)
 
 def prepare_matrix_gaze():
-    actions.tracking.jump()
-    sleep(0.03)
+    if should_jump():
+        actions.tracking.jump()
+        sleep(0.03)
     calc_grid()
     return ctrl.mouse_pos()
-
 
 @mod.action_class
 class GridActions:
@@ -428,7 +449,7 @@ class GridActions:
         to_previous_status()
     
     def matrix_gaze_range(size: int = 3):
-        """Move the mouse to the cell position closest to the gaze position"""
+        """Highlight the area closest to the gaze position"""
         pos = prepare_matrix_gaze()
         open_grid()
         activate_range(*pos, size)
