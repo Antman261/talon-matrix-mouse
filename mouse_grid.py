@@ -31,6 +31,7 @@ class Resolution(StrEnum):
 
 status: Status = Status.idle
 mouse_action = None
+drag_phase = 0
 cells = {}
 subcells = {}
 active_zone = "000"
@@ -164,11 +165,26 @@ theme = {
     "grid_bg": "00002244",
 }
 
+drag_theme = {
+    "zone_bg": "99302299",
+    "inner_highlight_bg": "99403485",
+    "cell_text": "dfccccdf",
+    "grid_line": "ab457960",
+    "grid_bg": "22000044",
+}
+
+
+def current_theme():
+    if mouse_action == "drag" or drag_phase > 0:
+        return drag_theme
+    return theme
+
 
 def draw_subgrid(c):
     (grid_x_start, grid_x_end, _, grid_y_start, __, ___) = get_active_cell_tuple()
+    active_theme = current_theme()
     c.paint.textsize = round(min(subgrid_cell_height * 0.7, subgrid_cell_width * 0.7))
-    c.paint.color = theme["grid_line"]
+    c.paint.color = active_theme["grid_line"]
     for idx in range(1, subgrid_num_columns):
         x_offset = grid_x_start + round(idx * subgrid_cell_width)
         c.draw_line(x_offset, grid_y_start, x_offset, grid_y_start + cell_height)
@@ -181,7 +197,7 @@ def draw_subgrid(c):
         (x_centre, y_centre) = subcells[letter]
         x_offset = x_centre - (textrect.width / 2)
         y_offset = y_centre + (textrect.height / 2)
-        c.paint.color = theme["cell_text"]
+        c.paint.color = active_theme["cell_text"]
         c.draw_text(letter, x_offset, y_offset)
 
 
@@ -198,7 +214,7 @@ def draw_zone(c):
     x_start = start[0]
     y_start = start[3]
     zone_box = Rect(x_start, y_start, zone_width, zone_height)
-    c.paint.color = theme["zone_bg"]
+    c.paint.color = current_theme()["zone_bg"]
     c.draw_rect(zone_box)
 
 
@@ -211,16 +227,18 @@ def range_key_to_xywh(range_key: str):
 
 
 def draw_range(c):
-    c.paint.color = theme["zone_bg"]
+    active_theme = current_theme()
+    c.paint.color = active_theme["zone_bg"]
     c.draw_rect(Rect(*range_key_to_xywh(active_range)))
-    c.paint.color = theme["inner_highlight_bg"]
+    c.paint.color = active_theme["inner_highlight_bg"]
     c.draw_rect(Rect(*range_key_to_xywh(active_inner_range)))
 
 
 def draw_grid():
     def on_draw(c):
+        active_theme = current_theme()
         c.paint.stroke_width = 1
-        c.paint.color = theme["grid_bg"]
+        c.paint.color = active_theme["grid_bg"]
         c.draw_rect(Rect(0, 0, screenWidth, screenHeight))
         c.paint.typeface = "arial"
         c.paint.textsize = round(min(cell_height * 0.5, cell_width * 0.5))
@@ -228,7 +246,7 @@ def draw_grid():
             draw_range(c)
         if active_zone != "000":
             draw_zone(c)
-        c.paint.color = theme["grid_line"]
+        c.paint.color = active_theme["grid_line"]
         for idx in range(1, num_columns):
             x_offset = round(idx * cell_width)
             if x_offset == screenWidth:
@@ -250,7 +268,7 @@ def draw_grid():
                 textrect = c.paint.measure_text(grid_key)[1]
                 x_offset = x_centre - (textrect.width / 2)
                 y_offset = y_centre + (textrect.height / 2)
-                c.paint.color = theme["cell_text"]
+                c.paint.color = active_theme["cell_text"]
                 c.draw_text(grid_key, x_offset, y_offset)
         if active_cell != "000":
             draw_subgrid(c)
@@ -276,6 +294,7 @@ def restore_tracking_state():
     actions.tracking.control1_toggle(control1_enabled)
 
 def perform_mouse_action(x, y, mouse_action: str | None = None):
+    global drag_phase
     save_tracking_state()
     actions.mouse_move(x, y)
     if mouse_action != None:
@@ -284,6 +303,10 @@ def perform_mouse_action(x, y, mouse_action: str | None = None):
                 actions.mouse_click(0)
             case "right":
                 actions.mouse_click(1)
+            case "drag":
+                if drag_phase == 0:
+                    actions.user.mouse_drag(0)
+                    drag_phase = 1
     restore_tracking_state()
 
 
@@ -325,19 +348,23 @@ def to_previous_status():
             close_grid()
     redraw()
 
-def close_grid():
-    global status, mcanvas, mouse_action, active_range
+def close_grid(reset_mouse_action: bool = True, cancel_drag: bool = False):
+    global status, mcanvas, mouse_action, active_range, drag_phase
     status = Status.idle
+    if cancel_drag and drag_phase > 0:
+        actions.mouse_release(0)
+        drag_phase = 0
     if mcanvas != None:
         mcanvas = mcanvas.close()
     clear_active_cell()
     active_range = None
-    mouse_action = None
+    if reset_mouse_action:
+        mouse_action = None
     ctx.tags = []
 
 
 def process_input(text, action="left"):
-    global mouse_action
+    global mouse_action, drag_phase
     input_length = len(text)
     letters: List[str] = list(text.upper())
     for letter in letters:
@@ -354,8 +381,18 @@ def process_input(text, action="left"):
                     mouse_action = action if action is not None else "left"
                 else:
                     mouse_action = action if action is not None else mouse_action
+                was_dragging = mouse_action == "drag" and drag_phase > 0
                 perform_mouse_action(*subcells[letter], mouse_action)
-                close_grid()
+                if mouse_action == "drag":
+                    if not was_dragging:
+                        close_grid(reset_mouse_action=False)
+                        open_grid()
+                    else:
+                        actions.mouse_release(0)
+                        drag_phase = 0
+                        close_grid()
+                else:
+                    close_grid()
     redraw()
 
 
@@ -436,7 +473,16 @@ class GridActions:
 
     def matrix_mouse_grid_stop():
         """Clear the mouse grid and cancel any in-progress action"""
-        close_grid()
+        close_grid(cancel_drag=True)
+
+    def matrix_mouse_grid_start_drag():
+        """Display the full mouse grid in drag mode"""
+        global mouse_action, drag_phase
+    
+        close_grid(cancel_drag=True)
+        drag_phase = 0
+        mouse_action = "drag"
+        open_grid()
 
     def matrix_mouse(letters: str, action: str | None = None):
         """Move the mouse to the grid position specified by letters and perform the action, if provided"""

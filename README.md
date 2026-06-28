@@ -21,7 +21,7 @@ git clone https://github.com/antman261/talon-matrix-mouse.git matrix-mouse
 
 ## Usage
 
-**_Tip!_**: Hide the matrix overlay at any time by uttering `clear`
+**_Tip!_**: Hide the matrix overlay at any time by uttering `matrix clear`
 
 ### Step by Step Activation
 
@@ -53,8 +53,27 @@ This also works with right clicking: `matrix right air bob drum`
 
 You can also use matrix mouse with eye tracking to quickly refine your mouse position and click targets. For example, `matrix look zone` will activate the zone closest to where you are looking. This works if "Control Mouse" AND "Gaze Control" is on, or it works if "Always On" is on in the eye tracking menu.
 
+### Dragging
+
+Use `matrix drag` to begin a two-step drag operation.
+
+1. Say `matrix drag`.
+2. Select a grid location to set the starting point of the drag.
+3. Select a second grid location to set the drag destination.
+
+For example:
+
+```text
+matrix drag
+gust harp drum
+red trap bat
+```
+
+The drag grid uses a red background to distinguish it from the normal single-click grid. Say `matrix clear` to cancel an active drag.
+
+
 ## Upcoming Features & Improvements
 
 * Customizable Styling: User defined settings controlling colors and transparency
-* Dragging: Start and stop dragging actions
+* Dragging: Further enhancements
 * Modifier clicking: Left click, right click, or drag with keyboard modifiers such as shift
