@@ -54,7 +54,8 @@ subgrid_num_columns = 7
 subgrid_num_rows = 3
 subgrid_cell_width = 0
 subgrid_cell_height = 0
-drag_path_seconds = 3.0
+drag_trail_pulse_duration = 3.0
+drag_sweep_action_duration = 0.5
 
 
 letter_matrix = [
@@ -94,10 +95,10 @@ def show_drag_path(start, end):
 
     def on_draw(c):
         elapsed = perf_counter() - start_time
-        if elapsed >= drag_path_seconds:
+        if elapsed >= drag_trail_pulse_duration:
             return
         pulse_cycles = 3.0
-        progress = elapsed / drag_path_seconds
+        progress = elapsed / drag_trail_pulse_duration
         pulse_phase = (progress * math.tau * pulse_cycles) - (math.pi / 2)
         # 0 -> 1 -> 0 repeated across the full display duration.
         pulse = 0.5 + (0.5 * math.sin(pulse_phase))
@@ -130,7 +131,7 @@ def show_drag_path(start, end):
         if drag_path_canvas is current_canvas:
             hide_drag_path()
 
-    cleanup_ms = int((drag_path_seconds + 0.1) * 1000)
+    cleanup_ms = int((drag_trail_pulse_duration + 0.1) * 1000)
     cron.after(f"{cleanup_ms}ms", cleanup_drag_path)
 
 
@@ -359,7 +360,7 @@ def save_tracking_state():
     control_enabled = actions.tracking.control_enabled()
     control1_enabled = actions.tracking.control1_enabled()
     actions.tracking.control_toggle(False)
-    actions.tracking.control1_toggle(False )
+    actions.tracking.control1_toggle(False)
     
 
 
@@ -383,11 +384,24 @@ def perform_mouse_action(x, y, mouse_action: str | None = None):
 def perform_drag(start, end):
     save_tracking_state()
     try:
-        actions.mouse_move(*start)
+        start_x, start_y = start
+        end_x, end_y = end
+        actions.mouse_move(start_x, start_y)
         ctrl.mouse_click(button=0, down=True)
-        sleep(0.02)
-        actions.mouse_move(*end)
-        sleep(0.03)
+        hold_seconds = 0.03
+        sleep(hold_seconds)
+
+        # Sweeping motion across intermediate points instead of teleporting.
+        steps = 40
+        step_delay_seconds = (drag_sweep_action_duration - (2 * hold_seconds)) / steps
+        for step in range(1, steps + 1):
+            t = step / steps
+            x = start_x + ((end_x - start_x) * t)
+            y = start_y + ((end_y - start_y) * t)
+            actions.mouse_move(x, y)
+            sleep(step_delay_seconds)
+
+        sleep(hold_seconds)
     finally:
         ctrl.mouse_click(button=0, up=True)
         restore_tracking_state()
