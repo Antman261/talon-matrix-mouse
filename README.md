@@ -69,7 +69,7 @@ gust harp drum
 red trap bat
 ```
 
-The drag grid uses a red background to distinguish it from the normal single-click grid. Say `matrix clear` to cancel an active drag.
+> The drag grid uses a cyan background to distinguish it from the normal single-click grid. Say `matrix clear` to cancel an active drag.
 
 
 ## Upcoming Features & Improvements
