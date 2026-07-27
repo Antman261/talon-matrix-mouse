@@ -451,7 +451,8 @@ def close_grid(reset_mouse_action: bool = True, cancel_drag: bool = False):
     global status, mcanvas, mouse_action, active_range, drag_start
     status = Status.idle
     if mcanvas != None:
-        mcanvas = mcanvas.close()
+        mcanvas.close()
+        mcanvas = None
     clear_active_cell()
     active_range = None
     if cancel_drag:
@@ -488,10 +489,10 @@ def process_input(text, action="left"):
                     else:
                         start = drag_start
                         end = subcells[letter]
-                        perform_drag(start, end)
-                        show_drag_path(start, end)
                         drag_start = None
                         close_grid()
+                        perform_drag(start, end)
+                        show_drag_path(start, end)
                 else:
                     perform_mouse_action(*subcells[letter], mouse_action)
                     close_grid()
