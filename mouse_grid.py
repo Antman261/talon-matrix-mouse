@@ -1,9 +1,9 @@
 from functools import reduce
 from enum import Enum, StrEnum, auto
 import math
-from time import sleep
+from time import sleep, perf_counter
 from typing import List
-from talon import Module, Context, ui, canvas, actions, ctrl
+from talon import Module, Context, ui, canvas, actions, ctrl, cron
 from talon.skia import Rect
 from talon.plugins import eye_mouse_2
 
@@ -13,6 +13,8 @@ mod.tag("matrix_mouse", desc="Moving mouse with matrix")
 mod.tag("matrix_mouse_subgrid_active", desc="Matrix mouse subgrid active")
 ctx = Context()
 mcanvas = None
+drag_path_canvas = None
+drag_path_refresh_job = None
 
 
 class Status(Enum):
@@ -31,6 +33,7 @@ class Resolution(StrEnum):
 
 status: Status = Status.idle
 mouse_action = None
+drag_start = None
 cells = {}
 subcells = {}
 active_zone = "000"
@@ -51,6 +54,8 @@ subgrid_num_columns = 7
 subgrid_num_rows = 3
 subgrid_cell_width = 0
 subgrid_cell_height = 0
+drag_trail_pulse_duration = 3.0
+drag_sweep_action_duration = 0.5
 
 
 letter_matrix = [
@@ -69,6 +74,65 @@ def redraw():
         return
     mcanvas.resume()
     mcanvas.pause()
+
+
+def hide_drag_path():
+    global drag_path_canvas, drag_path_refresh_job
+    if drag_path_refresh_job is not None:
+        cron.cancel(drag_path_refresh_job)
+        drag_path_refresh_job = None
+    if drag_path_canvas is not None:
+        drag_path_canvas.close()
+        drag_path_canvas = None
+
+
+def show_drag_path(start, end):
+    global drag_path_canvas, drag_path_refresh_job
+    hide_drag_path()
+    drag_path_canvas = canvas.Canvas.from_screen(ui.screens()[0])
+    drag_path_canvas.blocks_mouse = False
+    start_time = perf_counter()
+
+    def on_draw(c):
+        elapsed = perf_counter() - start_time
+        if elapsed >= drag_trail_pulse_duration:
+            return
+        pulse_cycles = 3.0
+        progress = elapsed / drag_trail_pulse_duration
+        pulse_phase = (progress * math.tau * pulse_cycles) - (math.pi / 2)
+        # 0 -> 1 -> 0 repeated across the full display duration.
+        pulse = 0.5 + (0.5 * math.sin(pulse_phase))
+        alpha = int(210 * pulse)
+        if alpha <= 0:
+            return
+
+        c.paint.style = c.paint.Style.STROKE
+        c.paint.stroke_width = 4
+        c.paint.color = f"2AD3F6{max(16, alpha // 4):02X}"
+        c.draw_line(*start, *end)
+
+        c.paint.stroke_width = 2
+        c.paint.color = f"9AF2FF{alpha:02X}"
+        c.draw_line(*start, *end)
+
+    drag_path_canvas.register("draw", on_draw)
+
+    def refresh_drag_path():
+        if drag_path_canvas is not None:
+            drag_path_canvas.resume()
+            drag_path_canvas.pause()
+
+    drag_path_refresh_job = cron.interval("33ms", refresh_drag_path)
+
+    current_canvas = drag_path_canvas
+
+    def cleanup_drag_path():
+        global drag_path_canvas
+        if drag_path_canvas is current_canvas:
+            hide_drag_path()
+
+    cleanup_ms = int((drag_trail_pulse_duration + 0.1) * 1000)
+    cron.after(f"{cleanup_ms}ms", cleanup_drag_path)
 
 
 def to_zone_key(row_index, column_index):
@@ -159,16 +223,31 @@ def calc_grid():
 theme = {
     "zone_bg": "30214499",
     "inner_highlight_bg": "30416485",
-    "cell_text": "ccccccdf",
-    "grid_line": "7945ab60",
-    "grid_bg": "00002244",
+    "cell_text": "E8DDF3D8",
+    "grid_line": "7945AB80",
+    "grid_bg": "120A2070",
 }
+
+drag_theme = {
+    "zone_bg": "1B4E5E99",
+    "inner_highlight_bg": "2D7AAE88",
+    "cell_text": "DFF8FFD8",
+    "grid_line": "74CFFB90",
+    "grid_bg": "0B1E2570",
+}
+
+
+def current_theme():
+    if mouse_action == "drag":
+        return drag_theme
+    return theme
 
 
 def draw_subgrid(c):
     (grid_x_start, grid_x_end, _, grid_y_start, __, ___) = get_active_cell_tuple()
+    active_theme = current_theme()
     c.paint.textsize = round(min(subgrid_cell_height * 0.7, subgrid_cell_width * 0.7))
-    c.paint.color = theme["grid_line"]
+    c.paint.color = active_theme["grid_line"]
     for idx in range(1, subgrid_num_columns):
         x_offset = grid_x_start + round(idx * subgrid_cell_width)
         c.draw_line(x_offset, grid_y_start, x_offset, grid_y_start + cell_height)
@@ -181,7 +260,7 @@ def draw_subgrid(c):
         (x_centre, y_centre) = subcells[letter]
         x_offset = x_centre - (textrect.width / 2)
         y_offset = y_centre + (textrect.height / 2)
-        c.paint.color = theme["cell_text"]
+        c.paint.color = active_theme["cell_text"]
         c.draw_text(letter, x_offset, y_offset)
 
 
@@ -198,7 +277,7 @@ def draw_zone(c):
     x_start = start[0]
     y_start = start[3]
     zone_box = Rect(x_start, y_start, zone_width, zone_height)
-    c.paint.color = theme["zone_bg"]
+    c.paint.color = current_theme()["zone_bg"]
     c.draw_rect(zone_box)
 
 
@@ -211,16 +290,29 @@ def range_key_to_xywh(range_key: str):
 
 
 def draw_range(c):
-    c.paint.color = theme["zone_bg"]
+    active_theme = current_theme()
+    c.paint.color = active_theme["zone_bg"]
     c.draw_rect(Rect(*range_key_to_xywh(active_range)))
-    c.paint.color = theme["inner_highlight_bg"]
+    c.paint.color = active_theme["inner_highlight_bg"]
     c.draw_rect(Rect(*range_key_to_xywh(active_inner_range)))
+
+
+def draw_drag_start(c):
+    x, y = drag_start
+    radius = min(subgrid_cell_width, subgrid_cell_height) * 0.45
+    c.paint.color = "ffcc3333"
+    c.draw_circle(x, y, radius * 2)
+    c.paint.color = "ffdd6688"
+    c.draw_circle(x, y, radius)
+    c.paint.color = "fff4c4ff"
+    c.draw_circle(x, y, radius * 0.3)
 
 
 def draw_grid():
     def on_draw(c):
+        active_theme = current_theme()
         c.paint.stroke_width = 1
-        c.paint.color = theme["grid_bg"]
+        c.paint.color = active_theme["grid_bg"]
         c.draw_rect(Rect(0, 0, screenWidth, screenHeight))
         c.paint.typeface = "arial"
         c.paint.textsize = round(min(cell_height * 0.5, cell_width * 0.5))
@@ -228,7 +320,7 @@ def draw_grid():
             draw_range(c)
         if active_zone != "000":
             draw_zone(c)
-        c.paint.color = theme["grid_line"]
+        c.paint.color = active_theme["grid_line"]
         for idx in range(1, num_columns):
             x_offset = round(idx * cell_width)
             if x_offset == screenWidth:
@@ -250,10 +342,12 @@ def draw_grid():
                 textrect = c.paint.measure_text(grid_key)[1]
                 x_offset = x_centre - (textrect.width / 2)
                 y_offset = y_centre + (textrect.height / 2)
-                c.paint.color = theme["cell_text"]
+                c.paint.color = active_theme["cell_text"]
                 c.draw_text(grid_key, x_offset, y_offset)
         if active_cell != "000":
             draw_subgrid(c)
+        if drag_start is not None:
+            draw_drag_start(c)
 
     mcanvas.register("draw", on_draw)
     mcanvas.pause()
@@ -266,7 +360,7 @@ def save_tracking_state():
     control_enabled = actions.tracking.control_enabled()
     control1_enabled = actions.tracking.control1_enabled()
     actions.tracking.control_toggle(False)
-    actions.tracking.control1_toggle(False )
+    actions.tracking.control1_toggle(False)
     
 
 
@@ -287,6 +381,32 @@ def perform_mouse_action(x, y, mouse_action: str | None = None):
     restore_tracking_state()
 
 
+def perform_drag(start, end):
+    save_tracking_state()
+    try:
+        start_x, start_y = start
+        end_x, end_y = end
+        actions.mouse_move(start_x, start_y)
+        ctrl.mouse_click(button=0, down=True)
+        hold_seconds = 0.03
+        sleep(hold_seconds)
+
+        # Sweeping motion across intermediate points instead of teleporting.
+        steps = 40
+        step_delay_seconds = (drag_sweep_action_duration - (2 * hold_seconds)) / steps
+        for step in range(1, steps + 1):
+            t = step / steps
+            x = start_x + ((end_x - start_x) * t)
+            y = start_y + ((end_y - start_y) * t)
+            actions.mouse_move(x, y)
+            sleep(step_delay_seconds)
+
+        sleep(hold_seconds)
+    finally:
+        ctrl.mouse_click(button=0, up=True)
+        restore_tracking_state()
+
+
 def open_grid(input_length: int = 0):
     global status
     status = Status.open
@@ -301,8 +421,9 @@ def activate_zone(zone):
     global status, active_zone
     status = Status.zone
     active_zone = zone
-    centre = get_zone_tuple()[2]
-    perform_mouse_action(centre[2], centre[5])
+    if mouse_action != "drag":
+        centre = get_zone_tuple()[2]
+        perform_mouse_action(centre[2], centre[5])
 
 
 def activate_cell(cell):
@@ -311,7 +432,8 @@ def activate_cell(cell):
     status = Status.cell
     (x_start, x_end, x_centre, y_start, y_end, y_centre) = get_active_cell_tuple()
     calc_subgrid(x_start, x_end, y_start, y_end)
-    perform_mouse_action(x_centre, y_centre)
+    if mouse_action != "drag":
+        perform_mouse_action(x_centre, y_centre)
 
 def to_previous_status():
     zone = active_zone
@@ -325,19 +447,24 @@ def to_previous_status():
             close_grid()
     redraw()
 
-def close_grid():
-    global status, mcanvas, mouse_action, active_range
+def close_grid(reset_mouse_action: bool = True, cancel_drag: bool = False):
+    global status, mcanvas, mouse_action, active_range, drag_start
     status = Status.idle
     if mcanvas != None:
-        mcanvas = mcanvas.close()
+        mcanvas.close()
+        mcanvas = None
     clear_active_cell()
     active_range = None
-    mouse_action = None
+    if cancel_drag:
+        drag_start = None
+        hide_drag_path()
+    if reset_mouse_action:
+        mouse_action = None
     ctx.tags = []
 
 
 def process_input(text, action="left"):
-    global mouse_action
+    global mouse_action, drag_start
     input_length = len(text)
     letters: List[str] = list(text.upper())
     for letter in letters:
@@ -354,8 +481,21 @@ def process_input(text, action="left"):
                     mouse_action = action if action is not None else "left"
                 else:
                     mouse_action = action if action is not None else mouse_action
-                perform_mouse_action(*subcells[letter], mouse_action)
-                close_grid()
+                if mouse_action == "drag":
+                    if drag_start is None:
+                        drag_start = subcells[letter]
+                        close_grid(reset_mouse_action=False)
+                        open_grid()
+                    else:
+                        start = drag_start
+                        end = subcells[letter]
+                        drag_start = None
+                        close_grid()
+                        perform_drag(start, end)
+                        show_drag_path(start, end)
+                else:
+                    perform_mouse_action(*subcells[letter], mouse_action)
+                    close_grid()
     redraw()
 
 
@@ -436,7 +576,16 @@ class GridActions:
 
     def matrix_mouse_grid_stop():
         """Clear the mouse grid and cancel any in-progress action"""
-        close_grid()
+        close_grid(cancel_drag=True)
+
+    def matrix_mouse_grid_start_drag():
+        """Display the full mouse grid in drag mode"""
+        global mouse_action, drag_start
+    
+        close_grid(cancel_drag=True)
+        drag_start = None
+        mouse_action = "drag"
+        open_grid()
 
     def matrix_mouse(letters: str, action: str | None = None):
         """Move the mouse to the grid position specified by letters and perform the action, if provided"""

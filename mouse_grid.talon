@@ -1,4 +1,5 @@
 matrix [show]: user.matrix_mouse_grid_start()
+matrix drag: user.matrix_mouse_grid_start_drag()
 matrix clear: user.matrix_mouse_grid_stop()
 matrix (gaze | look): user.matrix_gaze_range(3)
 matrix [(gaze | look)] zone: user.matrix_gaze("zone")
